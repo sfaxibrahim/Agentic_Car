@@ -1,0 +1,31 @@
+{% comment %} <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Chatbot</title>
+</head>
+<body>
+    <h1>Ask the AI</h1>
+    <form id="chatForm">
+        <input type="text" id="question" placeholder="Type your question..." required />
+        <button type="submit">Ask</button>
+    </form>
+    <div id="answer"></div>
+
+    <script>
+        document.getElementById("chatForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const question = document.getElementById("question").value;
+
+            const response = await fetch("/api/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(question)
+            });
+
+            const answer = await response.text();
+            document.getElementById("answer").innerText = answer;
+        });
+    </script>
+</body>
+</html> {% endcomment %}
