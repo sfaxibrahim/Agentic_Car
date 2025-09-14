@@ -17,7 +17,8 @@ import os
 import glob
 import json 
 from datetime import datetime
-import sys
+import queue
+from langchain.callbacks.base import BaseCallbackHandler
 
 Base_dir = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(Base_dir, '..', 'data', 'PDF')
@@ -194,10 +195,10 @@ def fast_rag_search(query):
         return f"❌ Error searching documents: {str(e)}"
 
 def youtube_search_fast(query):
-    """Enhanced YouTube search with better formatting and real-time feedback"""
-    if not os.environ.get("SERPAPI_API_KEY") or os.environ.get("SERPAPI_API_KEY") == "your_serpapi_key_here":
+    """Enhanced YouTube search that returns structured data for frontend embedding"""
+    if not os.environ.get("SERPAPI_API_KEY") or os.environ.get("SERPAPI_API_KEY") == "":
         return "❌ YouTube search unavailable: SERPAPI_API_KEY not configured"
-    
+         
     try:
         print(f"🎬 Searching YouTube for: '{query}'")
         params = {
@@ -205,36 +206,49 @@ def youtube_search_fast(query):
             "search_query": query,
             "api_key": os.environ["SERPAPI_API_KEY"]
         }
-        
+                 
         search = GoogleSearch(params)
         results = search.get_dict()
         video_results = results.get("video_results", [])
-        
+                 
         if not video_results:
             print("❌ No videos found")
             return f"No YouTube videos found for '{query}'"
+                 
+        print(f"✅ Found {len(video_results)} videos, returning top 3")
+                 
+        # Collect structured video data
+        videos_data = []
+        for video in video_results[:3]:
+            video_url = video.get('link', '')
+            video_id = ''
+            if 'youtube.com/watch?v=' in video_url:
+                video_id = video_url.split('v=')[1].split('&')[0]
+            elif 'youtu.be/' in video_url:
+                video_id = video_url.split('youtu.be/')[1].split('?')[0]
+ 
+            embed_url = f"https://www.youtube.com/embed/{video_id}" if video_id else ""
+ 
+            videos_data.append({
+                "id": video_id,
+                "title": video.get('title', 'No title'),
+                "channel": video.get('channel', {}).get('name', 'Unknown channel'),
+                "embed_url": embed_url
+            })
+ 
+        # Build clean streaming text for frontend
+        intro_text = f"Here are {len(videos_data)} videos about {query} that you might find helpful:"
         
-        print(f"✅ Found {len(video_results)} videos, showing top 3")
+        video_blocks = []
+        for i, v in enumerate(videos_data, 1):
+            video_block = f"Video {i}: {v['title']}\nChannel: {v['channel']}\n[VIDEO_EMBED]{v['embed_url']}[/VIDEO_EMBED]"
+            video_blocks.append(video_block)
         
-        formatted_results = []
-        for i, video in enumerate(video_results[:3], 1):
-            title = video.get('title', 'No title')
-            link = video.get('link', '#')
-            duration = video.get('duration', 'Duration not available')
-            channel = video.get('channel', {}).get('name', 'Unknown channel')
-            views = video.get('views', 'Views not available')
-            
-            video_info = f"""🎥 **Video {i}:** {title}
-👤 **Channel:** {channel}
-⏱️ **Duration:** {duration}
-👀 **Views:** {views}
-🔗 **Link:** {link}"""
-            
-            formatted_results.append(video_info)
+        # Combine with proper formatting
+        result_text = intro_text + "\n\n" + "\n\n".join(video_blocks) + "\n\nEnjoy watching!"
         
-        result = "\n🎬 **YouTube Search Results:**\n" + "="*50 + "\n\n" + "\n\n".join(formatted_results)
-        return result
-        
+        return result_text
+             
     except Exception as e:
         print(f"❌ YouTube search failed: {e}")
         return f"❌ YouTube search error: {str(e)}"
@@ -245,10 +259,38 @@ def google_search_wrapper(query):
         return "❌ Google search unavailable: SERPAPI_API_KEY not configured"
     
     try:
-        print(f"🌐 Searching Google for: '{query}'")
-        google_search = SerpAPIWrapper()
-        result = google_search.run(query)
+        print(f"Searching Google for: '{query}'")
+        params={
+            "engine": "google",
+            "q": query,
+            "api_key": os.environ["SERPAPI_API_KEY"],
+            "num": 5
+        }
+        # google_search = SerpAPIWrapper()
+        search=GoogleSearch(params)
+        results=search.get_dict()
+        organic_results = results.get("organic_results", [])
+        print(f"✅ Found {len(organic_results)} results")
+        formatted_results = []
+        for i, result in enumerate(organic_results[:3], 1):
+            title = result.get('title', 'No title')
+            link = result.get('link', '#')
+            snippet = result.get('snippet', 'No description available')
+            
+            result_info = f"""🔗 **Result {i}:** {title}
+**URL:** {link}
+**Description:** {snippet}"""
+            
+            formatted_results.append(result_info)
+        
+        final_result = "🔍 **Google Search Results:**\n" + "="*50 + "\n\n" + "\n\n".join(formatted_results)
+        
         print("✅ Google search completed")
+        return final_result
+
+
+        # result = google_search.run(query)
+        # print("Google search completed")
         return result
     except Exception as e:
         print(f"❌ Google search failed: {e}")
@@ -282,22 +324,50 @@ tools = [
         description="""Search Google for current information. Use for:
         - Current prices, dealership info, inventory
         - Latest news, recalls, new models
-        - Real-time data, local services
-        Input should be specific search terms."""
+        - Real-time data, local services, prices
+        - Anything time-sensitive or location-specific
+        - General web search if unsure
+        
+
+        Input should be a clear question or search terms.""",
     )
 ]
 
-def create_conversational_agent(memory):
+class QueueCallback(BaseCallbackHandler):
+    def __init__(self, q: queue.Queue):
+        self.q = q
+        self.collecting = False
+        self.buffer = ""
+
+    def on_llm_new_token(self, token: str, **kwargs):
+        self.buffer += token
+
+        if not self.collecting and "Final Answer:" in self.buffer:
+            self.collecting = True
+            token = self.buffer.split("Final Answer:", 1)[1]
+            self.q.put(token)
+        elif self.collecting:
+            self.q.put(token)
+
+    def on_chain_end(self, outputs, **kwargs):
+        self.q.put(None)
+
+def create_conversational_agent(memory, streaming_handler=None):
     """Create a conversational ReAct agent with proper prompt template"""
     try:
-        print("🧪 Testing Ollama connection...")
-        
+        callbacks=[]
+        if streaming_handler:
+            callbacks.append(streaming_handler)
+        else:
+            callbacks.append(StreamingStdOutCallbackHandler())
+
+
         # Create LLM with streaming
         llm = ChatOllama(
             model=CONFIG["model_name"], 
-            temperature=0.1,
-            verbose=True,
-            callbacks=[StreamingStdOutCallbackHandler()]
+            verbose=False,
+            callbacks=callbacks,
+            streaming=True,
         )
         
         
@@ -351,10 +421,10 @@ Thought: {agent_scratchpad}"""
             agent=agent,
             tools=tools,
             memory=memory,
-            verbose=True,
+            verbose=False,
             handle_parsing_errors=True,
             max_iterations=4,
-            return_intermediate_steps=True
+            return_intermediate_steps=False,
         )
         
         return agent_executor
@@ -365,6 +435,47 @@ Thought: {agent_scratchpad}"""
         print("1. Ollama is running: ollama serve")
         print(f"2. Model is pulled: ollama pull {CONFIG['model_name']}")
         raise
+
+import threading 
+def get_bot_response_stream(user_input: str):
+    q = queue.Queue()
+    cb = QueueCallback(q)
+
+    memory = setup_memory()
+    load_previous_history(memory)
+    agent_executor = create_conversational_agent(memory, streaming_handler=cb)
+
+    def token_generator():
+        def run_agent():
+            try:
+                agent_executor.invoke({
+                    "input": user_input,
+                    "chat_history": memory.chat_memory.messages
+                })
+            except Exception as e:
+                q.put(f"[Agent error: {e}]")
+            finally:
+                q.put(None)
+
+        threading.Thread(target=run_agent, daemon=True).start()
+
+        collected = []
+        while True:
+            token = q.get()
+            if token is None:
+                break
+            collected.append(token)
+            yield token  
+
+        # save full answer
+        full_output = "".join(collected)
+        try:
+            save_exchange(user_input, full_output)
+        except Exception:
+            pass
+
+    return token_generator()
+
 
 def get_bot_response(user_input: str) -> str:
     """API-friendly chatbot response generator"""
@@ -387,17 +498,8 @@ def get_bot_response(user_input: str) -> str:
         return "An error occurred while generating the response."
         
 
-# def main():
-#     """Main function with initialization checks"""
-#     print("🚀 Starting Enhanced Automotive Assistant...")
-    
-#     # Setup RAG system
-#     rag_success = setup_fast_rag()
-#     if not rag_success:
-#         print("Continuing without PDF knowledge base...")
-    
-#     # Start chat
-#     get_bot_response()
 
-# if __name__ == "__main__":
-#     main()
+
+
+# result = youtube_search_fast("BMW Serie 3")
+# print(result)
