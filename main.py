@@ -6,7 +6,7 @@ import asyncio
 from fastapi.responses import StreamingResponse
 import json
 
-from src.search import setup_fast_rag, get_bot_response  ,get_bot_response_stream
+from src.search import  get_bot_response  ,get_bot_response_stream
 
 Base_dir = os.path.dirname(os.path.abspath(__file__))
 

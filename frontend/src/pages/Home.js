@@ -1,19 +1,48 @@
 import React, { useEffect, useState, useRef } from "react";
 import "../styles/Home.css";
+import { fetchUser } from "../services/api";
+import { useNavigate } from "react-router-dom";
+
 
 function Home() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
+  const [userData, setUserData] = useState(null);
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+  const navigate = useNavigate();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
+
+  const handleLogout = () => {
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("refreshToken");
+  navigate("/", { replace: true });
+};
+
+
+useEffect(() => {
+  const loadUser = async () => {
+    try {
+      const data = await fetchUser();
+      setUserData(data); 
+    } catch (err) {
+      setError("Failed to load user");
+      console.error(err);
+    }
+  };
+
+  loadUser();
+}, []);
+
 
   useEffect(() => {
     scrollToBottom();
@@ -124,6 +153,7 @@ const renderMessageContent = (message) => {
   );
 };
 
+
   const askAIStream = async () => {
   if ((!question.trim() && !uploadedFile) || loading) return;
 
@@ -182,7 +212,7 @@ const renderMessageContent = (message) => {
 
       // DEBUG: Log what we're receiving
       console.log('Received chunk:', chunk);
-      console.log('Full text so far:', fullText);
+      // console.log('Full text so far:', fullText);
 
       // Update UI immediately with raw content
       setMessages(prev =>
@@ -281,7 +311,7 @@ const renderMessageContent = (message) => {
           <div className="sidebar-header">
             <div className="header-main">
               <h2>AutoSense AI</h2>
-              <span className="version">v2.2 Enhanced</span>
+              <span className="version">v2.0 Pro</span>
             </div>
             <div className="header-icons">
               <button 
@@ -347,8 +377,19 @@ const renderMessageContent = (message) => {
               </span>
             </div>
             <div className="info-item">
-              <span className="label">Theme:</span>
-              <span className="value">{darkMode ? 'Dark' : 'Light'}</span>
+              <span className="label">Welcome :</span>
+              <span className="value">{userData ? userData.username :"Loading......"}</span>
+              <button
+                onClick={handleLogout}
+                className="logout-btn"
+                title="Logout"
+              >
+                <svg className="logout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16,17 21,12 16,7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+              </button>
             </div>
           </div>
         </div>
@@ -365,28 +406,22 @@ const renderMessageContent = (message) => {
                
                 <div className="welcome-suggestions">
                   <button 
-                    onClick={() => setQuestion("Show me BMW Serie 3 videos")}
+                    onClick={() => setQuestion("Show me .... videos")}
                     className="suggestion-chip"
                   >
-                    🎥 BMW Serie 3 Videos
+                    Cars Videos
                   </button>
                   <button 
-                    onClick={() => setQuestion("Audi A5 price 2024")}
+                    onClick={() => setQuestion("current .... price ")}
                     className="suggestion-chip"
                   >
-                    💰 Current Prices
+                    Current Research 
                   </button>
                   <button 
                     onClick={() => setQuestion("Engine maintenance checklist")}
                     className="suggestion-chip"
                   >
-                    🔧 Maintenance Tips
-                  </button>
-                  <button 
-                    onClick={() => setQuestion("Tesla Model Y videos")}
-                    className="suggestion-chip"
-                  >
-                    🏎️ Car Reviews
+                    Maintenance Tips
                   </button>
                 </div>
               </div>
@@ -396,7 +431,7 @@ const renderMessageContent = (message) => {
                   <div key={message.id} className={`message ${message.type}`}>
                     <div className="message-avatar">
                       <div className={`${message.type}-avatar`}>
-                        {message.type === 'user' ? '👤' : '🤖'}
+                        {message.type === 'user' ? '👤' : '⌬'}
                       </div>
                     </div>
                     <div className="message-content">
@@ -417,7 +452,7 @@ const renderMessageContent = (message) => {
                 {loading && (
                   <div className="message ai">
                     <div className="message-avatar">
-                      <div className="ai-avatar">🤖</div>
+                      <div className="ai-avatar">⌬</div>
                     </div>
                     <div className="message-content">
                       <div className="message-bubble ai typing">

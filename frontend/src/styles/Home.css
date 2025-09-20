@@ -504,6 +504,34 @@ body.dark-mode {
 
 
 
+.logout-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.logout-icon {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+}
+
+.logout-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+  background: linear-gradient(45deg, #ff5252, #d84315);
+}
+
+
 /* Enhanced Input Area */
 .input-area {
   background: rgba(255, 255, 255, 0.95);

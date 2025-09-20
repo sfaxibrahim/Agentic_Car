@@ -23,7 +23,8 @@ from langchain.callbacks.base import BaseCallbackHandler
 Base_dir = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(Base_dir, '..', 'data', 'PDF')
 DATA_DIR = os.path.abspath(DATA_DIR)
-
+VECTORSTORE_PATH = os.path.join(Base_dir, '..', 'data', 'vector_store_faiss')
+VECTORSTORE_PATH = os.path.abspath(VECTORSTORE_PATH)
 CONFIG = {
     "model_name": "mistral:latest",
     "memory_window": 5,
@@ -100,63 +101,91 @@ def save_exchange(human_input, ai_response):
     except Exception as e:
         print(f"⚠️ Could not save exchange: {e}")
 
-def setup_fast_rag():
-    """Ultra-fast RAG setup - loads once, stores in memory"""
-    global vector_store, bm25_retriever, pdf_texts
+# def setup_fast_rag():
+#     """Ultra-fast RAG setup - loads once, stores in memory"""
+#     global vector_store, bm25_retriever, pdf_texts
     
-    if not os.path.exists(DATA_DIR):
-        print(f"⚠️ PDF directory not found: {DATA_DIR}")
-        print("Creating directory...")
-        os.makedirs(DATA_DIR, exist_ok=True)
-        print("Please add PDF files to this directory and restart.")
-        return False
+#     if not os.path.exists(DATA_DIR):
+#         print(f"⚠️ PDF directory not found: {DATA_DIR}")
+#         print("Creating directory...")
+#         os.makedirs(DATA_DIR, exist_ok=True)
+#         print("Please add PDF files to this directory and restart.")
+#         return False
     
-    pdf_files = glob.glob(os.path.join(DATA_DIR, "*.pdf"))
-    if not pdf_files:
-        print(f"⚠️ No PDF files found in {DATA_DIR}")
-        print("Please add PDF files to this directory for knowledge base functionality.")
-        return False
+#     pdf_files = glob.glob(os.path.join(DATA_DIR, "*.pdf"))
+#     if not pdf_files:
+#         print(f"⚠️ No PDF files found in {DATA_DIR}")
+#         print("Please add PDF files to this directory for knowledge base functionality.")
+#         return False
     
-    print(f"📚 Loading {len(pdf_files)} PDF files into memory...")
-    all_docs = []
+#     print(f"📚 Loading {len(pdf_files)} PDF files into memory...")
+#     all_docs = []
     
-    for pdf_file in pdf_files:
-        try:
-            print(f"  📄 Loading: {os.path.basename(pdf_file)}")
-            loader = PyPDFLoader(pdf_file)
-            docs = loader.load()
+#     for pdf_file in pdf_files:
+#         try:
+#             print(f"  📄 Loading: {os.path.basename(pdf_file)}")
+#             loader = PyPDFLoader(pdf_file)
+#             docs = loader.load()
             
-            full_text = " ".join([doc.page_content for doc in docs])
-            pdf_texts[pdf_file] = full_text
+#             full_text = " ".join([doc.page_content for doc in docs])
+#             pdf_texts[pdf_file] = full_text
             
-            all_docs.extend(docs)
-        except Exception as e:
-            print(f"⚠️ Error loading {pdf_file}: {e}")
-            continue
+#             all_docs.extend(docs)
+#         except Exception as e:
+#             print(f"⚠️ Error loading {pdf_file}: {e}")
+#             continue
     
-    if not all_docs:
-        print("⚠️ No documents could be loaded")
-        return False
+#     if not all_docs:
+#         print("⚠️ No documents could be loaded")
+#         return False
     
-    try:
-        print("🔄 Processing documents...")
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-        chunks = text_splitter.split_documents(all_docs)
+#     try:
+#         print("🔄 Processing documents...")
+#         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+#         chunks = text_splitter.split_documents(all_docs)
         
-        print("🔄 Creating embeddings...")
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        vector_store = FAISS.from_documents(chunks, embeddings)
+#         print("🔄 Creating embeddings...")
+#         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+#         vector_store = FAISS.from_documents(chunks, embeddings)
         
-        print("🔄 Setting up BM25 retriever...")
-        bm25_retriever = BM25Retriever.from_documents(chunks)
+#         print("🔄 Setting up BM25 retriever...")
+#         bm25_retriever = BM25Retriever.from_documents(chunks)
+#         bm25_retriever.k = 15
+        
+#         print(f"✅ RAG system ready! Loaded {len(chunks)} chunks from {len(pdf_files)} PDFs")
+#         return True
+        
+#     except Exception as e:
+#         print(f"❌ Error setting up RAG system: {e}")
+#         return False
+def load_vectorstore():
+    """Load FAISS vectorstore from disk if not already in memory."""
+    global vector_store
+    if vector_store is None:
+        if os.path.exists(VECTORSTORE_PATH):
+            print(f"📂 Loading FAISS vectorstore from: {VECTORSTORE_PATH}")
+            from langchain_huggingface import HuggingFaceEmbeddings
+            embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+            vector_store = FAISS.load_local(
+                VECTORSTORE_PATH,
+                embeddings,
+                allow_dangerous_deserialization=True
+            )
+        else:
+            print("❌ No saved FAISS vectorstore found on disk.")
+    return vector_store
+
+def load_bm25():
+    """Rebuild BM25 retriever from FAISS stored documents if needed."""
+    global bm25_retriever, vector_store
+    if bm25_retriever is None and vector_store is not None:
+        print("🔄 Rebuilding BM25 retriever from FAISS docs...")
+        # FAISS stores docs internally
+        docs = vector_store.docstore._dict.values()
+        bm25_retriever = BM25Retriever.from_documents(list(docs))
         bm25_retriever.k = 15
-        
-        print(f"✅ RAG system ready! Loaded {len(chunks)} chunks from {len(pdf_files)} PDFs")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error setting up RAG system: {e}")
-        return False
+    return bm25_retriever
 
 def fast_rag_search(query):
     """Hybrid RAG search with semantic + keyword results"""
@@ -164,6 +193,8 @@ def fast_rag_search(query):
     
     print(f"🔍 Searching PDF knowledge base for: '{query}'")
     
+    vector_store = load_vectorstore()
+    bm25_retriever = load_bm25()    
     if vector_store is None or bm25_retriever is None:
         return "❌ RAG system not initialized. Please check if PDF files are loaded correctly."
     
@@ -301,35 +332,36 @@ tools = [
     Tool(
         name="PDF_Knowledge_Base",
         func=fast_rag_search,
-        description="""Search the automotive PDF knowledge base. Use this FIRST for:
-        - Car maintenance, repair procedures, troubleshooting
-        - Buying guides, vehicle recommendations
+        description=""""Use this tool ONLY for structured, text-based automotive knowledge.
+        Best for:
+        - Car maintenance guides, step-by-step instructions
+        - Troubleshooting, repair manuals
         - Technical specifications, features, comparisons  
         - General automotive knowledge and how things work
         - Safety tips, best practices
-        Input should be a clear question about automotive topics."""
+        - General automotive explanations ("how does X work?")
+        Do NOT use if user asks for videos, visual demonstrations, prices, news, or dealerships.
+        Input: clear technical or how-to question."""
     ),
     Tool(
         name="YouTube_Search",
         func=youtube_search_fast,
         description="""Search YouTube for automotive videos. Use when user asks for:
         - Videos, visual demonstrations, tutorials
-        - "Show me how to", "I want to see", "video"
+        - Requests with words like "video", "show me", "watch", "see", "tutorial"
         - Step-by-step visual guides
-        Input should be search terms for automotive videos."""
+        Input: search terms describing the automotive video requested."""
     ),
     Tool(
         name="Google_Search", 
         func=google_search_wrapper,
         description="""Search Google for current information. Use for:
         - Current prices, dealership info, inventory
-        - Latest news, recalls, new models
+        - Latest news, recalls, new models releases
         - Real-time data, local services, prices
         - Anything time-sensitive or location-specific
         - General web search if unsure
-        
-
-        Input should be a clear question or search terms.""",
+         Input: clear query about news, prices, availability, or real-time info."""
     )
 ]
 
@@ -370,14 +402,12 @@ def create_conversational_agent(memory, streaming_handler=None):
             streaming=True,
         )
         
-        
-        # Try to get the standard ReAct prompt from hub
         try:
             prompt = hub.pull("hwchase17/react-chat")
-            print("✅ Using standard ReAct prompt from hub")
+            print("Using standard ReAct prompt from hub")
         except:
             # Fallback: Create custom prompt template
-            print("⚠️ Hub unavailable, using custom prompt")
+            print("Hub unavailable, using custom prompt")
             template = """You are an expert automotive assistant. Answer the following questions as best you can. You have access to the following tools:
 
 {tools}
@@ -501,5 +531,5 @@ def get_bot_response(user_input: str) -> str:
 
 
 
-# result = youtube_search_fast("BMW Serie 3")
+# result = fast_rag_search("how to change a tire")
 # print(result)

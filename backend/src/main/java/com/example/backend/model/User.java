@@ -1,12 +1,13 @@
 package com.example.backend.model;
 
-
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.Getter;
+import lombok.Setter;
+import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UuidGenerator;
-import java.util.UUID;
 
 import java.util.Date;
+import java.util.UUID;
 
 @Entity
 @Table(name = "users")
@@ -17,17 +18,19 @@ public class User {
     @Id
     @GeneratedValue
     @UuidGenerator
-    private  UUID id;
+    private UUID id;
 
-    @Column(nullable = false,unique = true)
+    @Column(nullable = false, unique = true)
     private String username;
+
     @Column(nullable = false, unique = true)
     private String email;
-    @Column (nullable = false)
+
+    @Column(nullable = false)
     private String password;
 
-    @Column(nullable = false, updatable = false)
+    @CreationTimestamp
     @Temporal(TemporalType.TIMESTAMP)
-    @org.hibernate.annotations.CreationTimestamp
-    private Date CreatedAt;
+    @Column(nullable = false, updatable = false)
+    private Date createdAt;
 }
