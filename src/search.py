@@ -19,6 +19,7 @@ import json
 from datetime import datetime
 import queue
 from langchain.callbacks.base import BaseCallbackHandler
+import requests
 
 Base_dir = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(Base_dir, '..', 'data', 'PDF')
@@ -49,57 +50,92 @@ def setup_memory():
         output_key="output"
     )
 
-def load_previous_history(memory):
-    """Load last 5 exchanges from previous sessions"""
-    if not CONFIG["save_history"] or not os.path.exists(CONFIG["history_file"]):
-        return
+# def load_previous_history(memory):
+#     """Load last 5 exchanges from previous sessions"""
+#     if not CONFIG["save_history"] or not os.path.exists(CONFIG["history_file"]):
+#         return
     
-    try:
-        with open(CONFIG["history_file"], 'r', encoding='utf-8') as f:
-            history_data = json.load(f)
+#     try:
+#         with open(CONFIG["history_file"], 'r', encoding='utf-8') as f:
+#             history_data = json.load(f)
         
-        recent_exchanges = history_data.get('exchanges', [])[-CONFIG["memory_window"]:]
+#         recent_exchanges = history_data.get('exchanges', [])[-CONFIG["memory_window"]:]
         
-        for exchange in recent_exchanges:
-            memory.chat_memory.add_user_message(exchange['human'])
-            memory.chat_memory.add_ai_message(exchange['ai'])
+#         for exchange in recent_exchanges:
+#             memory.chat_memory.add_user_message(exchange['human'])
+#             memory.chat_memory.add_ai_message(exchange['ai'])
         
-        if recent_exchanges:
-            print(f"✅ Loaded {len(recent_exchanges)} previous exchanges")
+#         if recent_exchanges:
+#             print(f"✅ Loaded {len(recent_exchanges)} previous exchanges")
             
-    except Exception as e:
-        print(f"⚠️ Could not load history: {e}")
+#     except Exception as e:
+#         print(f"⚠️ Could not load history: {e}")
 
-def save_exchange(human_input, ai_response):
-    """Save exchange to history file"""
-    if not CONFIG["save_history"]:
+API = "http://localhost:8080"
+def api_headers(access_token):
+    return {"Authorization": f"Bearer {access_token}", "Content-Type":"application/json"}
+
+
+def load_previous_history(memory,conv_id, access_token):
+    url=f"http://localhost:8080/api/conversations/{conv_id}/messages"
+    resp=requests.get(url,headers=api_headers(access_token))
+    if resp.status_code!=200:
         return
-    
-    exchange = {
-        "timestamp": datetime.now().isoformat(),
-        "human": human_input,
-        "ai": ai_response
-    }
-    
-    try:
-        history_file = CONFIG["history_file"]
-        
-        if os.path.exists(history_file):
-            with open(history_file, 'r', encoding='utf-8') as f:
-                history_data = json.load(f)
+    messages=resp.json()
+    for m in messages:
+        if m['role']=='USER':
+            memory.chat_memory.add_user_message(m['content'])
         else:
-            history_data = {"exchanges": []}
+            memory.chat_memory.add_ai_message(m['content'])
+
+
+def save_exchange_to_db(conv_id, human_input, ai_response, access_token):
+    # POST human message
+    requests.post(
+        f"http://localhost:8080/api/conversations/{conv_id}/messages",
+        json={"role":"USER","content":human_input},
+        headers=api_headers(access_token)
+    )
+
+    # POST AI message
+    requests.post(
+        f"http://localhost:8080/api/conversations/{conv_id}/messages",
+        json={"role":"ASSISTANT","content":ai_response},
+        headers=api_headers(access_token)
+    )
+
+
+
+# def save_exchange(human_input, ai_response):
+#     """Save exchange to history file"""
+#     if not CONFIG["save_history"]:
+#         return
+    
+#     exchange = {
+#         "timestamp": datetime.now().isoformat(),
+#         "human": human_input,
+#         "ai": ai_response
+#     }
+    
+#     try:
+#         history_file = CONFIG["history_file"]
         
-        history_data["exchanges"].append(exchange)
+#         if os.path.exists(history_file):
+#             with open(history_file, 'r', encoding='utf-8') as f:
+#                 history_data = json.load(f)
+#         else:
+#             history_data = {"exchanges": []}
         
-        if len(history_data["exchanges"]) > 100:
-            history_data["exchanges"] = history_data["exchanges"][-100:]
+#         history_data["exchanges"].append(exchange)
         
-        with open(history_file, 'w', encoding='utf-8') as f:
-            json.dump(history_data, f, indent=2, ensure_ascii=False)
+#         if len(history_data["exchanges"]) > 100:
+#             history_data["exchanges"] = history_data["exchanges"][-100:]
+        
+#         with open(history_file, 'w', encoding='utf-8') as f:
+#             json.dump(history_data, f, indent=2, ensure_ascii=False)
             
-    except Exception as e:
-        print(f"⚠️ Could not save exchange: {e}")
+#     except Exception as e:
+#         print(f"⚠️ Could not save exchange: {e}")
 
 # def setup_fast_rag():
 #     """Ultra-fast RAG setup - loads once, stores in memory"""
@@ -467,16 +503,19 @@ Thought: {agent_scratchpad}"""
         raise
 
 import threading 
-def get_bot_response_stream(user_input: str):
+def get_bot_response_stream(user_input: str, conv_id: str, access_token: str):
     q = queue.Queue()
     cb = QueueCallback(q)
 
     memory = setup_memory()
-    load_previous_history(memory)
+    load_previous_history(memory, conv_id, access_token)
     agent_executor = create_conversational_agent(memory, streaming_handler=cb)
 
     def token_generator():
+        collected = []
+
         def run_agent():
+            nonlocal collected
             try:
                 agent_executor.invoke({
                     "input": user_input,
@@ -487,22 +526,26 @@ def get_bot_response_stream(user_input: str):
             finally:
                 q.put(None)
 
+                # Save AI response here, after agent finishes
+                full_output = "".join(collected)
+                try:
+                    resp_ai = requests.post(
+                        f"http://localhost:8080/api/conversations/{conv_id}/messages",
+                        json={"role":"ASSISTANT","content":full_output},
+                        headers=api_headers(access_token)
+                    )
+                    print("Saved AI:", resp_ai.status_code, resp_ai.text)
+                except Exception as e:
+                    print("❌ Failed to save exchange:", e)
+
         threading.Thread(target=run_agent, daemon=True).start()
 
-        collected = []
         while True:
             token = q.get()
             if token is None:
                 break
             collected.append(token)
-            yield token  
-
-        # save full answer
-        full_output = "".join(collected)
-        try:
-            save_exchange(user_input, full_output)
-        except Exception:
-            pass
+            yield token
 
     return token_generator()
 
@@ -520,7 +563,7 @@ def get_bot_response(user_input: str) -> str:
         })
         if result and "output" in result:
             ai_response = result["output"]
-            save_exchange(user_input, ai_response)
+            save_exchange_to_db(user_input, ai_response)
             return ai_response
         else:
             return "I'm having trouble processing your request."

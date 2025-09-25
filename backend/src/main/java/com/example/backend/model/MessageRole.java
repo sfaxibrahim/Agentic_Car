@@ -1,4 +1,6 @@
 package com.example.backend.model;
 
-public class MessageRole {
+public enum MessageRole {
+    USER,
+    ASSISTANT
 }

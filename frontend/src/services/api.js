@@ -1,24 +1,45 @@
-// FIXED API Service - api.js
+// =====================
+// Robust API Service - api.js
+// =====================
+
 const BASE_URL = "http://localhost:8080/api";
 
+// ---------------------
+// TOKEN STORAGE HELPERS
+// ---------------------
+function getTokens() {
+  return {
+    accessToken: localStorage.getItem("accessToken"),
+    refreshToken: localStorage.getItem("refreshToken"),
+  };
+}
+
+function setTokens({ accessToken, refreshToken }) {
+  if (accessToken) localStorage.setItem("accessToken", accessToken);
+  if (refreshToken) localStorage.setItem("refreshToken", refreshToken);
+}
+
+function clearTokens() {
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("refreshToken");
+}
+
+// ---------------------
+// AUTH FUNCTIONS
+// ---------------------
 export async function registerUser(username, email, password) {
   try {
     const response = await fetch(`${BASE_URL}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, email, password })
+      body: JSON.stringify({ username, email, password }),
     });
-    
+
     const data = await response.json();
-    
-    if (response.ok) {
-      // Success - backend returns a success message string
-      return { success: true, message: data };
-    } else {
-      // Error - backend returns error message
-      return { success: false, error: data };
-    }
-  } catch (error) {
+    return response.ok
+      ? { success: true, message: data }
+      : { success: false, error: data };
+  } catch {
     return { success: false, error: "Network error occurred" };
   }
 }
@@ -28,40 +49,21 @@ export async function loginUser(username, password) {
     const response = await fetch(`${BASE_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ username, password }),
     });
-    
+
     const data = await response.json();
-    
+
     if (response.ok) {
-      // Success - backend returns JwtResponse with accessToken and refreshToken
-      return { 
-        success: true, 
-        accessToken: data.accessToken, 
-        refreshToken: data.refreshToken 
-      };
+      setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+      return { success: true, accessToken: data.accessToken, refreshToken: data.refreshToken };
     } else {
-      // Error - backend returns error message string
       return { success: false, error: data };
     }
-  } catch (error) {
+  } catch {
     return { success: false, error: "Network error occurred" };
   }
 }
-
-
-function getTokens(){
-  return {
-    accessToken: localStorage.getItem("accessToken"),
-    refreshToken: localStorage.getItem("refreshToken")
-  };
-}
-// Save tokens to localStorage
-function setTokens({ accessToken, refreshToken }) {
-  localStorage.setItem("accessToken", accessToken);
-  localStorage.setItem("refreshToken", refreshToken);
-}
-
 
 export async function refreshAccessToken() {
   const { refreshToken } = getTokens();
@@ -74,51 +76,74 @@ export async function refreshAccessToken() {
   });
 
   if (!response.ok) {
+    clearTokens();
     throw new Error("Refresh token expired or invalid");
   }
+
   const data = await response.json();
   setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
   return data.accessToken;
 }
 
-// services/api.js
-export async function fetchUser() {
-  try {
-    const data = await apiFetch("/user/me");
-    return data;
-  } catch (err) {
-    console.error("Failed to fetch user:", err);
-    throw err; // propagate to component
-  }
-}
+// ---------------------
+// MAIN FETCH WRAPPER
+// ---------------------
+export const apiFetch = async (endpoint, options = {}) => {
+  let { accessToken } = getTokens(); // always fresh
 
-
-
-// Generic fetch wrapper that auto-refreshes token
-export async function apiFetch(url, options = {}) {
-  let { accessToken } = getTokens();
-
-  // Add Authorization header
-  options.headers = {
-    ...options.headers,
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${accessToken}`,
+  const makeRequest = async (token) => {
+    return fetch(`${BASE_URL}${endpoint}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
   };
 
-  let response = await fetch(`${BASE_URL}${url}`, options);
+  let response = await makeRequest(accessToken);
 
-  // If token expired, refresh and retry
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     try {
-      accessToken = await refreshAccessToken(); // refresh
-      options.headers.Authorization = `Bearer ${accessToken}`;
-      response = await fetch(`${BASE_URL}${url}`, options); // retry
+      console.log("[apiFetch] Access token expired, refreshing...");
+      accessToken = await refreshAccessToken(); // refresh and update local var
+
+      response = await makeRequest(accessToken); // retry with new token
+      console.log("[apiFetch] Retried request status:", response.status);
     } catch (err) {
-      throw new Error("Session expired. Please login again.");
+      console.error("[apiFetch] Refresh failed:", err);
+      clearTokens();
+      throw new Error("Session expired. Please log in again.");
     }
   }
 
-  const data = await response.json();
-  if (!response.ok) throw new Error(data);
-  return data;
+  if (!response.ok) throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+
+  return response.json();
+};
+
+// ---------------------
+// USER API
+// ---------------------
+export async function fetchUser() {
+  try {
+    return await apiFetch("/user/me");
+  } catch (err) {
+    console.error("[fetchUser] Failed:", err);
+    throw err;
+  }
+}
+
+// ---------------------
+// CONVERSATION APIs
+// ---------------------
+export const listConversationsApi = () => apiFetch("/conversations", { method: "GET" });
+
+export async function createConversationApi(body = { title: "New conversation" }) {
+  return await apiFetch("/conversations", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function patchConversationTitleApi(convId, body = { title: "" }) {
+  return await apiFetch(`/conversations/${convId}`, { method: "PATCH", body: JSON.stringify(body) });
 }
