@@ -57,3 +57,9 @@ htmlcov/
 
 # History
 chat_history.json
+
+
+tests/
+src/services/sraper_service.py
+src/services/car_dealer_service.py
+
