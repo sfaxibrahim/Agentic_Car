@@ -60,6 +60,8 @@ chat_history.json
 
 
 tests/
-src/services/sraper_service.py
-src/services/car_dealer_service.py
+src/services/scraper_service.py
+src/services/car_deal_service.py
+src/services/autoscout_service.py
+
 
