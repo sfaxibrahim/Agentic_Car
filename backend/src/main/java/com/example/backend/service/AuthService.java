@@ -9,6 +9,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +28,24 @@ public class AuthService {
         }
         return new LoginResponse("Invalid username or password",null);
 
+    }
+
+    public User findOrCreateGoogleUser(String email, String name) {
+        // 1. Check if user already exists
+        Optional<User> existingUser = userRepository.findByEmail(email);
+        if (existingUser.isPresent()) {
+            return existingUser.get();
+        }
+
+        // 2. If not, create a new user
+        User newUser = new User();
+        newUser.setEmail(email);
+        newUser.setUsername(name); // you can also extract part of email or generate unique username
+        // Optional: set a random password since Google login doesn't need it
+        newUser.setPassword(passwordEncoder.encode(UUID.randomUUID().toString()));
+
+        // 3. Save user
+        return userRepository.save(newUser);
     }
 
 

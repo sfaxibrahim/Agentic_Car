@@ -1,0 +1,33 @@
+{
+  "makes": {
+    "bmw": 15,
+    "audi": 10,
+    "mercedes": 45,
+    "mercedes-benz": 45,
+    "volkswagen": 68,
+    "vw": 68,
+    "porsche": 55,
+    "ford": 20,
+    "toyota": 63,
+    "honda": 28,
+    "nissan": 48,
+    "opel": 50,
+    "renault": 56,
+    "peugeot": 52,
+    "citroen": 13,
+    "fiat": 19,
+    "hyundai": 29,
+    "kia": 36,
+    "mazda": 43,
+    "mitsubishi": 46,
+    "suzuki": 61,
+    "skoda": 59,
+    "seat": 58,
+    "volvo": 69,
+    "land rover": 38,
+    "jaguar": 32,
+    "mini": 44,
+    "smart": 60
+  },
+  "models": {}
+}

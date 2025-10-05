@@ -12,6 +12,7 @@ import java.util.UUID;
 @Repository
 public interface MessageRepository extends JpaRepository<Message, UUID> {
     List<Message> findByConversationOrderByCreatedAtAsc(Conversation conversation);
+    void deleteByConversation(Conversation conversation);
 
     List<Message> findByConversationOrderByCreatedAtDesc(Conversation conversation, Pageable pageable);
 

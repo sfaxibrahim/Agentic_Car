@@ -5,7 +5,6 @@ import {
   apiFetch,
   createConversationApi,
   listConversationsApi,
-  patchConversationTitleApi,
   refreshAccessToken
 } from "../services/api";
 import { useNavigate } from "react-router-dom";
@@ -16,20 +15,21 @@ function Home() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [conversations, setConversations] = useState([]);
-  const [activeConvId, setActiveconvId] = useState(null);
+  const [activeConvId, setActiveConvId] = useState(null); // Capital C
   const [userData, setUserData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
+  
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
-
   const lastOpenedConvId = useRef(null);
-
+  
   const navigate = useNavigate();
-   const [tokens, setTokens] = useState({
+
+  const [tokens, setTokens] = useState({
     accessToken: localStorage.getItem("accessToken"),
     refreshToken: localStorage.getItem("refreshToken"),
   });
@@ -80,19 +80,66 @@ function Home() {
       }
     } catch (error) {
       console.error("Failed to load conversations", error);
-      setConversations([]); // Set empty array on error
+      setConversations([]); 
     }
   };
-
-  const deleteConversation = async (convId) => {
+// -----------------------------
+// Delete a conversation
+// -----------------------------
+const deleteConversation = async (convId) => {
   try {
     await apiFetch(`/conversations/${convId}`, { method: "DELETE" });
-    setConversations((prev) => prev.filter((c) => c.id !== convId));
-    if (activeConvId === convId) setActiveconvId(null);
+
+    // Get fresh data from server
+    const convs = await listConversationsApi();
+    setConversations(convs);
+
+    // If we deleted the active conv — open the first remaining or clear UI
+    if (activeConvId === convId) {
+      lastOpenedConvId.current = null;
+      if (convs.length > 0) {
+        await openConversation(convs[0].id);
+      } else {
+        setActiveConvId(null);
+        setMessages([]);
+      }
+    }
   } catch (err) {
     console.error("Failed to delete conversation", err);
+    // try to resync anyway
+    try {
+      const convs = await listConversationsApi();
+      setConversations(convs);
+    } catch (e) {
+      console.error("Failed to refresh conversations after delete error", e);
+    }
   }
 };
+
+
+// -----------------------------
+// Create a new conversation
+// -----------------------------
+const handleNewChat = async () => {
+  try {
+    console.log("🔄 Creating new conversation...");
+    const conv = await createConversationApi();
+    console.log("✅ Created conversation:", conv);
+
+    // Add new conversation to the list
+    setConversations((prev) => [conv, ...prev]);
+
+    // Reset ref before opening
+    lastOpenedConvId.current = null;
+
+    // Clear messages and open new conversation
+    setMessages([]);
+    openConversation(conv.id);
+  } catch (err) {
+    console.error("❌ Failed to create conversation", err);
+  }
+};
+
 
   // --- In useEffect for conversations ---
   useEffect(() => {
@@ -124,7 +171,7 @@ function Home() {
 
   try {
     setLoading(true);
-    setActiveconvId(convId);
+    setActiveConvId(convId);
     
     // Clear existing messages first to prevent duplicates
     setMessages([]);
@@ -151,18 +198,6 @@ function Home() {
 };
 
 
-  const handleNewChat = async () => {
-    try {
-      const conv = await createConversationApi({ title: "New conversation" });
-      // conv should return { id, title }
-      setConversations((prev) => [conv, ...prev]);
-      await openConversation(conv.id);
-    } catch (err) {
-      console.error("Failed to create conversation", err);
-    }
-  };
-
- 
   useEffect(() => {
     const loadUser = async () => {
       try {
@@ -217,107 +252,283 @@ function Home() {
     oscillator.stop(audioContext.currentTime + 0.2);
   };
 
-  const renderMessageContent = (message) => {
+ 
+    const renderMessageContent = (message) => {
     const content = message.content;
 
-    // Clean up the content - replace literal \n with actual newlines
-    const cleanContent = content.replace(/\\n/g, "\n");
+    // ===== CHECK 1: Is it a CAR LISTING? =====
+    if (content.includes('**Option') && (content.includes('BMW') || content.includes('Price:'))) {
+      return renderCarListings(content);  // Use the car cards function
+    }
 
-    // Split into intro text and video sections
-    const parts = cleanContent.split(/Video \d+:/);
-    const introText = parts[0].trim();
+    // ===== CHECK 2: Is it a VIDEO LISTING? =====
+    if (content.includes('[VIDEO_EMBED]')) {
+      // Your EXISTING video code stays here - don't change it
+      const cleanContent = content.replace(/\\n/g, "\n");
+      const parts = cleanContent.split(/Video \d+:/);
+      const introText = parts[0].trim();
+      const videoSections = parts.slice(1);
 
-    // Get video sections (skip first part which is intro)
-    const videoSections = parts.slice(1);
+      return (
+        <div className="message-text">
+          <div style={{ marginBottom: "20px", fontSize: "16px", whiteSpace: "pre-wrap" }}>
+            {introText}
+          </div>
 
-    return (
-      <div className="message-text">
-        {/* Intro text */}
-        <div
-          style={{
-            marginBottom: "20px",
-            fontSize: "16px",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {introText}
-        </div>
-
-        {/* Video grid */}
-        <div
-          style={{
+          <div style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
             gap: "20px",
-          }}
-        >
-          {videoSections.map((section, idx) => {
-            // Extract embed URL
-            const embedMatch = section.match(
-              /\[VIDEO_EMBED\](.*?)\[\/VIDEO_EMBED\]/
-            );
-            const embedUrl = embedMatch ? embedMatch[1] : null;
+          }}>
+            {videoSections.map((section, idx) => {
+              const embedMatch = section.match(/\[VIDEO_EMBED\](.*?)\[\/VIDEO_EMBED\]/);
+              const embedUrl = embedMatch ? embedMatch[1] : null;
+              const textContent = section.replace(/\[VIDEO_EMBED\].*?\[\/VIDEO_EMBED\]/, "").trim();
+              const lines = textContent.split("\n").filter((line) => line.trim());
+              const title = lines[0] || `Video ${idx + 1}`;
+              const channel = lines.find((line) => line.includes("Channel:")) || "";
 
-            // Extract text (remove embed tags)
-            const textContent = section
-              .replace(/\[VIDEO_EMBED\].*?\[\/VIDEO_EMBED\]/, "")
-              .trim();
-            const lines = textContent.split("\n").filter((line) => line.trim());
-
-            const title = lines[0] || `Video ${idx + 1}`;
-            const channel =
-              lines.find((line) => line.includes("Channel:")) || "";
-
-            return (
-              <div
-                key={idx}
-                style={{
+              return (
+                <div key={idx} style={{
                   border: "1px solid #ddd",
                   borderRadius: "12px",
                   overflow: "hidden",
                   boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-                }}
-              >
-                {embedUrl && (
-                  <div
-                    style={{
-                      position: "relative",
-                      paddingBottom: "56.25%",
-                      height: 0,
-                    }}
-                  >
-                    <iframe
-                      src={embedUrl}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        height: "100%",
-                      }}
-                      frameBorder="0"
-                      allowFullScreen
-                    />
-                  </div>
-                )}
-                <div style={{ padding: "16px" }}>
-                  <h3 style={{ margin: "0 0 8px 0", fontSize: "16px" }}>
-                    {title}
-                  </h3>
-                  {channel && (
-                    <p style={{ margin: 0, fontSize: "14px", color: "#666" }}>
-                      {channel}
-                    </p>
+                }}>
+                  {embedUrl && (
+                    <div style={{ position: "relative", paddingBottom: "56.25%", height: 0 }}>
+                      <iframe
+                        src={embedUrl}
+                        style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
+                        frameBorder="0"
+                        allowFullScreen
+                      />
+                    </div>
                   )}
+                  <div style={{ padding: "16px" }}>
+                    <h3 style={{ margin: "0 0 8px 0", fontSize: "16px" }}>{title}</h3>
+                    {channel && <p style={{ margin: 0, fontSize: "14px", color: "#666" }}>{channel}</p>}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
+      );
+    }
+
+    // ===== CHECK 3: Default - Regular text =====
+    return (
+      <div className="message-text" style={{ whiteSpace: "pre-wrap" }}>
+        {content}
       </div>
     );
   };
+  
+const renderCarListings = (content) => {
+  if (!content.includes('**Option') || !content.includes('Price:')) {
+    return content;
+  }
 
+  const parts = content.split(/\*\*Option \d+:\*\*/);
+  const introText = parts[0].trim();
+  const carSections = parts.slice(1);
+
+  return (
+    <div className="message-text">
+      {introText && (
+        <div style={{ marginBottom: '1.25rem', fontSize: '0.9375rem', color: darkMode ? '#e0e0e0' : '#333' }}>
+          {introText}
+        </div>
+      )}
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))',
+          gap: '1rem',
+        }}
+      >
+        {carSections.map((section, idx) => {
+            const lines = section.split('\n').filter(l => l.trim());
+
+    // Find the title line
+          const titleLine = lines.find(l =>
+              l.trim().startsWith('•') &&
+              !l.includes('Price:') &&
+              !l.includes('Year:') &&
+              !l.includes('Mileage:') &&
+              !l.includes('Fuel:') &&
+              !l.includes('Transmission:') &&
+              !l.includes('Location:') &&
+              !l.includes('Link:')
+          );
+          const title = titleLine ? titleLine.replace(/•/g, '').trim() : '';
+
+          const price = lines.find(l => l.includes('Price:'))?.split('Price:')[1]?.trim() || 'N/A';
+          const year = lines.find(l => l.includes('Year:'))?.split('Year:')[1]?.trim() || 'N/A';
+          const mileage = lines.find(l => l.includes('Mileage:'))?.split('Mileage:')[1]?.trim() || 'N/A';
+          const fuel = lines.find(l => l.includes('Fuel:'))?.split('Fuel:')[1]?.trim() || 'N/A';
+          const transmission = lines.find(l => l.includes('Transmission:'))?.split('Transmission:')[1]?.trim() || 'N/A';
+          const location = lines.find(l => l.includes('Location:'))?.split('Location:')[1]?.trim() || 'N/A';
+          let link = null;
+          const linkLine = lines.find(l => l.includes('Link:'));
+          if (linkLine) {
+            // Extract URL inside parentheses if Markdown-style
+            const match = linkLine.match(/\((https?:\/\/[^\s)]+)\)/);
+            if (match) {
+              link = match[1]; // correct URL
+            } else {
+              // fallback: just remove 'Link:' and trim
+              link = linkLine.split('Link:')[1].replace(/[\[\]]/g, '').trim();
+            }
+          }
+
+          return (
+            <div
+              key={idx}
+              style={{
+                border: darkMode ? '1px solid #333' : '1px solid #e5e5e5',
+                borderRadius: '0.5rem',
+                overflow: 'hidden',
+                backgroundColor: darkMode ? '#1a1a1a' : '#ffffff',
+                transition: 'all 0.2s ease',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#3b82f6';
+                e.currentTarget.style.boxShadow = '0 0.25rem 0.75rem rgba(59, 130, 246, 0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = darkMode ? '#333' : '#e5e5e5';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+              onClick={() => link && window.open(link, '_blank')}
+            >
+              {/* Header */}
+              <div
+                style={{
+                  padding: '1rem 1.25rem',
+                  borderBottom: darkMode ? '1px solid #333' : '1px solid #f0f0f0',
+                  backgroundColor: darkMode ? '#0f0f0f' : '#fafafa',
+                }}
+              >
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: '0.9375rem',
+                    fontWeight: '600',
+                    color: darkMode ? '#fff' : '#1a1a1a',
+                    lineHeight: '1.5',
+                  }}
+                >
+                  {title || 'Vehicle'}
+                </h3>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '1.25rem' }}>
+                {/* Price */}
+                {price && (
+                  <div
+                    style={{
+                      fontSize: '1.5rem',
+                      fontWeight: '700',
+                      color: '#3b82f6',
+                      marginBottom: '1rem',
+                      letterSpacing: '-0.02em',
+                    }}
+                  >
+                    {price}
+                  </div>
+                )}
+
+                {/* Specs */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.625rem',
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  {year && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: darkMode ? '#888' : '#666', fontWeight: '500' }}>Year</span>
+                      <span style={{ color: darkMode ? '#e0e0e0' : '#1a1a1a', fontWeight: '600' }}>{year}</span>
+                    </div>
+                  )}
+                  {mileage && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: darkMode ? '#888' : '#666', fontWeight: '500' }}>Mileage</span>
+                      <span style={{ color: darkMode ? '#e0e0e0' : '#1a1a1a', fontWeight: '600' }}>{mileage}</span>
+                    </div>
+                  )}
+                  {/* {fuel && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: darkMode ? '#888' : '#666', fontWeight: '500' }}>Fuel</span>
+                      <span style={{ color: darkMode ? '#e0e0e0' : '#1a1a1a', fontWeight: '600' }}>{fuel}</span>
+                    </div>
+                  )} */}
+                  {transmission && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: darkMode ? '#888' : '#666', fontWeight: '500' }}>Transmission</span>
+                      <span style={{ color: darkMode ? '#e0e0e0' : '#1a1a1a', fontWeight: '600' }}>{transmission}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Location */}
+                {location && (
+                  <div
+                    style={{
+                      marginTop: '1rem',
+                      paddingTop: '1rem',
+                      borderTop: darkMode ? '1px solid #2a2a2a' : '1px solid #f0f0f0',
+                      fontSize: '0.8125rem',
+                      color: darkMode ? '#888' : '#666',
+                    }}
+                  >
+                    {location}
+                  </div>
+                )}
+
+                {/* Button */}
+                {link && (
+                  <button
+                    style={{
+                      marginTop: '1rem',
+                      width: '100%',
+                      padding: '0.75rem',
+                      backgroundColor: darkMode ? '#fff' : '#1a1a1a',
+                      color: darkMode ? '#1a1a1a' : '#fff',
+                      border: 'none',
+                      borderRadius: '0.375rem',
+                      fontSize: '0.875rem',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#3b82f6';
+                      e.currentTarget.style.color = '#fff';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = darkMode ? '#fff' : '#1a1a1a';
+                      e.currentTarget.style.color = darkMode ? '#1a1a1a' : '#fff';
+                    }}
+                  >
+                    View Details
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
   
   const askAIStream = async () => {
     if ((!question.trim() && !uploadedFile) || loading) return;
@@ -346,7 +557,7 @@ function Home() {
 
     try {
       const accessToken = await getFreshAccessToken();
-      const response = await fetch("http://localhost:8000/chat/stream", {
+      const response = await fetch(`${process.env.REACT_APP_FASTAPI_URL}/chat/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -2,8 +2,10 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { loginUser } from "../../services/api";
+import {GoogleLogin} from '@react-oauth/google';
 import "../../styles/Auth.css";
 import { useLocation } from "react-router-dom";
+
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -118,6 +120,34 @@ export default function LoginPage() {
             {isLoading ? "Signing In..." : "Sign In"}
           </button>
         </form>
+        <div className="oauth-login">
+          <GoogleLogin
+          onSuccess={async (credentialResponse) => {
+            try {
+              const res = await fetch("http://localhost:8080/api/auth/google", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token: credentialResponse.credential })
+              });
+              
+              const data = await res.json();
+              if (res.ok) {
+                localStorage.setItem("accessToken", data.accessToken);
+                localStorage.setItem("refreshToken", data.refreshToken);
+                navigate("/home", { state: { message: 'Welcome via Google!', type: 'success' } });
+              } else {
+                alert(data.error || "Google login failed");
+              }
+            } catch (err) {
+              console.error("Google login error", err);
+            }
+          }}
+          onError={() => {
+            console.log("Google Login Failed");
+          }}
+        />
+      </div>
+
 
         <div className="auth-footer">
           Don't have an account?{" "}
@@ -125,6 +155,7 @@ export default function LoginPage() {
             Create Account
           </Link>
         </div>
+        
       </div>
       
       {message.text && (

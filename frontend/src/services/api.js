@@ -2,7 +2,9 @@
 // Robust API Service - api.js
 // =====================
 
-const BASE_URL = "http://localhost:8080/api";
+const BASE_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8080/api";
+
+
 
 // ---------------------
 // TOKEN STORAGE HELPERS
@@ -91,6 +93,7 @@ export async function refreshAccessToken() {
 export const apiFetch = async (endpoint, options = {}) => {
   let { accessToken } = getTokens(); // always fresh
 
+  
   const makeRequest = async (token) => {
     return fetch(`${BASE_URL}${endpoint}`, {
       ...options,
@@ -140,10 +143,8 @@ export async function fetchUser() {
 // ---------------------
 export const listConversationsApi = () => apiFetch("/conversations", { method: "GET" });
 
-export async function createConversationApi(body = { title: "New conversation" }) {
-  return await apiFetch("/conversations", { method: "POST", body: JSON.stringify(body) });
+export async function createConversationApi() {
+  return await apiFetch("/conversations", { method: "POST"});
 }
 
-export async function patchConversationTitleApi(convId, body = { title: "" }) {
-  return await apiFetch(`/conversations/${convId}`, { method: "PATCH", body: JSON.stringify(body) });
-}
+

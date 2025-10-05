@@ -5,7 +5,7 @@ import os
 import requests
 from fastapi.responses import StreamingResponse
 
-from src.search import  get_bot_response  ,get_bot_response_stream
+from tests.search import  get_bot_response  ,get_bot_response_stream
 
 Base_dir = os.path.dirname(os.path.abspath(__file__))
 

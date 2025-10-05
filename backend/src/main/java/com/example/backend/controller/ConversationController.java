@@ -23,13 +23,29 @@ public class ConversationController {
 
     // create new conversation
     @PostMapping
-    public ResponseEntity<?> createConversation(@RequestBody Map<String, String> body, Authentication auth) {
-        String title = body.get("title");
-        String username = auth.getName(); // from SecurityContext
-        var user = userRepository.findByUsername(username).orElseThrow();
-        Conversation conv = conversationService.createConversation(user.getId(), title);
-        return ResponseEntity.ok(Map.of("id", conv.getId(), "title", conv.getTitle()));
+    public ResponseEntity<?> createConversation(Authentication auth) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body("Unauthenticated");
+        }
+
+        String username = auth.getName();
+        System.out.println("Authenticated username: " + username);
+
+        var userOpt = userRepository.findByUsername(username);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(404).body("User not found");
+        }
+
+        User user = userOpt.get();
+        Conversation conv = conversationService.createConversation(user.getId());
+
+        return ResponseEntity.ok(Map.of(
+                "id", conv.getId(),
+                "title", conv.getTitle()
+        ));
     }
+
+
 
     // list user's conversations
     @GetMapping
@@ -46,35 +62,6 @@ public class ConversationController {
         return ResponseEntity.ok(dto);
     }
 
-    // FIXED: Change from GET to PATCH for updating conversation
-    @PatchMapping("/{id}")
-    public ResponseEntity<?> patchConversation(@PathVariable UUID id, @RequestBody Map<String, String> body, Authentication auth) {
-        String username = auth.getName();
-        var user = userRepository.findByUsername(username).orElseThrow();
-        Conversation conv = conversationService.getConversationById(id);
-        if (!conv.getUser().getId().equals(user.getId())) {
-            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
-        }
-        String newTitle = body.get("title");
-        if (newTitle != null) {
-            conv.setTitle(newTitle);
-            conversationRepository.save(conv); // inject repo or call service method
-        }
-        return ResponseEntity.ok(Map.of("id", conv.getId(), "title", conv.getTitle()));
-    }
-
-    // ADD: Delete conversation endpoint (referenced in frontend)
-    @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteConversation(@PathVariable UUID id, Authentication auth) {
-        String username = auth.getName();
-        var user = userRepository.findByUsername(username).orElseThrow();
-        Conversation conv = conversationService.getConversationById(id);
-        if (!conv.getUser().getId().equals(user.getId())) {
-            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
-        }
-        conversationRepository.delete(conv);
-        return ResponseEntity.ok(Map.of("message", "Conversation deleted successfully"));
-    }
 
     // list messages in conversation
     @GetMapping("/{id}/messages")
@@ -99,4 +86,12 @@ public class ConversationController {
         Message msg = conversationService.addMessage(id, role, content);
         return ResponseEntity.ok(Map.of("id", msg.getId(), "createdAt", msg.getCreatedAt()));
     }
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteConversation(@PathVariable UUID id) {
+        conversationService.deleteConversation(id);
+        return ResponseEntity.noContent().build(); // 204 No Content
+    }
+
+
+
 }
